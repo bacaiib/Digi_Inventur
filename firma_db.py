@@ -9,57 +9,36 @@ CONN_STR = (
     "TrustServerCertificate=yes;"
 )
 
-def fetch_artikel_by_nr(art_nr):
-    conn = pyodbc.connect(CONN_STR)
-    cursor = conn.cursor()
+def fetch_artikel_lager():
+        conn = pyodbc.connect(CONN_STR)
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        SELECT *
-        FROM dbo.ART_STAMM_VW
-        WHERE ART_NR = ?
-    """, (art_nr,))
+        sql = """
+              SELECT ART_NR, 
+                     HERST_NAME, 
+                     HERST_ART_NR, 
+                     ART_NAME, 
+                     WG_NR, 
+                     WOG_NR, 
+                     EK, 
+                     EINH, 
+                     EINH_BEST, 
+                     EINH_UMR,
+                     WG_NAME,
+                     Lager
+              FROM dbo.ART_STAMM_VW
+              WHERE Aktiv = 1 AND WOG_NR > 3
+              ORDER BY WG_NAME ASC, HERST_ART_NR ASC
+              """
 
-    columns = [col[0] for col in cursor.description]
-    row = cursor.fetchone()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        columns = [c[0] for c in cursor.description]
 
-    conn.close()
+        data = [dict(zip(columns, row)) for row in rows]
 
-    if not row:
-        return None
-
-    # Row in Dict umwandeln
-    result = {}
-    for col, value in zip(columns, row):
-        if isinstance(value, bytes):
-            try:
-                value = value.decode("utf-8")
-            except:
-                value = value.decode("latin1", errors="ignore")
-        result[col] = value
-
-    return result
-
-def fetch_artikel_top10():
-    conn = pyodbc.connect(CONN_STR)
-    cursor = conn.cursor()
-    cursor.execute("SELECT TOP 2 * FROM dbo.ART_STAMM_VW")
-
-    # Spaltennamen holen
-    columns = [col[0] for col in cursor.description]
-
-    result = []
-    for row in cursor.fetchall():
-        row_dict = {}
-        for col_name, value in zip(columns, row):
-            # Bytes in Strings umwandeln
-            if isinstance(value, bytes):
-                try:
-                    value = value.decode("utf-8")
-                except:
-                    value = value.decode("latin1", errors="ignore")
-            row_dict[col_name] = value
-
-        result.append(row_dict)
-
-    conn.close()
-    return result
+        conn.close()
+        unique_wg = {row["WG_NAME"] for row in data}
+        anzahl_wg = len(unique_wg)
+        count = len(rows)
+        return count, anzahl_wg, data
