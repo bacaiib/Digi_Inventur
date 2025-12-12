@@ -13,9 +13,10 @@ def startseite(request):
     return HttpResponse("Hallo, das ist die Startseite der Inventur-App 🙂")
 
 def lager_artikel_view(request):
-    count, anzahl_wg, data = fetch_artikel_lager()
+    count, anzahl_wg, unique_wg, gruppen, uebergruppen = fetch_artikel_lager()
     return render(request, "lager_artikel.html", {
         "count": count,
         "group": anzahl_wg,
-        "artikel": data
+        "unique_wg": unique_wg,
+        "uebergruppen": uebergruppen,
     })

@@ -1,31 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
+<body>
+
 <h2>Gefundene Artikel: {{ count }}</h2>
 <h2>Gefundene Gruppen: {{ group }}</h2>
+<h2>Gruppen: {{ unique_wg }}</h2>
 
-<table border="1" cellspacing="0" cellpadding="5">
-    <thead>
-        <tr>
-            <th>Cortexnr.</th>
-            <th>Hersteller</th>
-            <th>Artikelnr. Hersteller</th>
-            <th>Gruppe</th>
-            <th>Artikelnaam</th>
-            <th>EK</th>
-            <th>Lager</th>
-        </tr>
-    </thead>
+
+
+{% for ueber_name, artikel_liste in uebergruppen.items %}
+  <h2>{{ ueber_name }} ({{ artikel_liste|length }})</h2>
+
+  <table border="1" cellspacing="0" cellpadding="5">
     <tbody>
-        {% for art in artikel %}
+      {% for art in artikel_liste %}
         <tr>
-            <td>{{ art.ART_NR }}</td>
-            <td>{{ art.HERST_NAME }}</td>
-            <td>{{ art.HERST_ART_NR }}</td>
-            <td>{{ art.WG_NAME }}</td>
-            <td>{{ art.ART_NAME }}</td>
-            <td>{{ art.EK }}</td>
-            <td>{{ art.Lager }}</td>
+          <td>{{ art.ART_NR }}</td>
+          <td>{{ art.HERST_NAME }}</td>
+          <td>{{ art.HERST_ART_NR }}</td>
+          <td>{{ art.WG_NAME }}</td>
+          <td>{{ art.ART_NAME }}</td>
+          <td>{{ art.EK }}</td>
+          <td>{{ art.Lager }}</td>
         </tr>
-        {% endfor %}
+      {% endfor %}
     </tbody>
-</table>
+  </table>
+{% endfor %}
+
+
+</body>
+</html>
