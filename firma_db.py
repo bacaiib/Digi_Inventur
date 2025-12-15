@@ -12,53 +12,81 @@ CONN_STR = (
 )
 
 UEBERGRUPPEN = {
-    "3D-Druck": {"Filament", "Zubehör aus 3D-Druck"},
-    "Displays": {"Displays"},
-    "Drahtseile-Halter": {"Drahtseile", "Drahtseilhalter"},
-    "Druckfolien": {"Folien - Druck", "Folien - Magnetisch/Ferro"},
-    "Laminate": {"Laminat"},
-    "Papier": {"Papier"},
-    "Papier Filme nicht SK": {"Filme nicht SK"},
-    "Platten": {"Platten", "Platten Acryl"},
-    "Plottfolien": {"Folien - Plott"},
-    "POS-Zubehör": {"POS-Zubehör"},
-    "PVC-Rollenware": {"PVC"},
-    "Standfüße Ürofile sont.": {"Profile sonstige", "standfüße"},
-    "Textil-Rollenware": {"Textilien dye-sub", "Textilien UV & sonstiges"},
-    "Truckframe txwall": {"truckframe", "txtrail", "txframe", "txwall"},
-    "Verbrauchsmat. Druck": {"Druck"},
-    "Verbrauchsmat. Klebebänder": {"Klebebänder"},
-    "Verbrauchsmat. Klett-Flauschbänder": {"Klett- & Flauschbänder"},
-    "Verbrauchsmat. Konfektion": {"Konfektion"},
-    "Verbrauchsmat. Messer Fräsen": {"Messer & Fräsen"},
-    "Verbrauchsmat. Metall": {"Metall"},
-    "Verbrauchsmat. Montage": {"Montage"},
-    "Verbrauchsmat. Tinten": {"Tinten"},
-    "Verbrauchsmat. Versand": {"Versand"},
-    "Verbrauchsmat. Werbetechnik": {"Werbetechnik"},
-    "Zubehör Metall": {"LED", "Zubehör"},
+    "3D-Druck": {56, 59},
+    "Displays": {36},
+    "Drahtseile-Halter": {62, 63},
+    "Druckfolien": {18, 78},
+    "Laminate": {40},
+    "Papier": {20},
+    "Papier Filme nicht SK": {55},
+    "Platten": {19, 77},
+    "Plottfolien": {54},
+    "POS-Zubehör": {61},
+    "PVC-Rollenware": {8},
+    "Standfüße Profile sont.": {42, 64},
+    "Textil-Rollenware": {3, 75},
+    "Truckframe txwall": {22, 57, 9, 21},
+    "Verbrauchsmat. Druck": {28},
+    "Verbrauchsmat. Klebebänder": {70},
+    "Verbrauchsmat. Klett-Flauschbänder": {71},
+    "Verbrauchsmat. Konfektion": {29},
+    "Verbrauchsmat. Messer Fräsen": {72},
+    "Verbrauchsmat. Metall": {31},
+    "Verbrauchsmat. Montage": {33},
+    "Verbrauchsmat. Tinten": {73},
+    "Verbrauchsmat. Versand": {32},
+    "Verbrauchsmat. Werbetechnik": {30},
+    "Zubehör Metall": {34, 24},
 }
 
-AUSLASSEN = {
-    "Büro",
-    "Dienstleistungen",
-    "Druck Extern / Zukauf",
-    "Konstruktionen",
-    "Overhead",
-    "Pulvern/Eloxieren/Bearbeitung",
-    "Rohrrahmen",
-    "skyframe",
-    "Zubehör Kundenspezifisch",
+AUSLASSEN = {44, 6, 9, 110, 9992, 8123, 123, 634}
+
+STANDORTE = {
+    "A": {
+        "label": "Thamm GmbH",
+        "skip_groups": set(),  # nichts auslassen
+    },
+    "B": {
+        "label": "Thamm Süd GmbH",
+        "skip_groups": {"3D-Druck", "Truckframe txwall"},  # Beispiel
+    },
 }
 
+def filtere_gruppen_fuer_standort(unique_wg, gruppen, skip_groups):
+    """Filtert Gruppen nach Gruppennamen (z.B. '3D-Druck')."""
+    skip_groups = set(skip_groups or [])
+    unique_wg = [g for g in unique_wg if g not in skip_groups]
+    gruppen = {g: gruppen[g] for g in unique_wg}
+    return unique_wg, gruppen
 
-def norm_name(s) -> str:
-    """Robust normalisieren (NBSP, Mehrfachspaces, Casefold)."""
-    if s is None:
-        return ""
-    s = str(s).replace("\u00A0", " ")
-    s = re.sub(r"\s+", " ", s).strip()
-    return s.casefold()
+
+def wg_num(k):
+    m = re.search(r"\bWG\s*(\d+)\b", str(k))
+    return int(m.group(1)) if m else 10**9
+
+
+def gruppiere_artikel_nach_wg_nr(artikel_liste, uebergruppen, auslassen):
+    wg_nr_to_ueber = {}
+    for ueber_name, wg_nr_set in uebergruppen.items():
+        for wg_nr in wg_nr_set:
+            if wg_nr in wg_nr_to_ueber:
+                print("WARN doppelte WG_NR:", wg_nr)
+            wg_nr_to_ueber[wg_nr] = ueber_name
+
+    gruppen = defaultdict(list)
+
+    for art in artikel_liste:
+        wg_nr = art.get("WG_NR")
+
+        if wg_nr is None:
+            continue
+        if wg_nr in auslassen:
+            continue
+
+        ziel_gruppe = wg_nr_to_ueber.get(wg_nr, f"WG {wg_nr}")
+        gruppen[ziel_gruppe].append(art)
+
+    return dict(gruppen)
 
 
 def fetch_artikel_lager():
@@ -72,15 +100,15 @@ def fetch_artikel_lager():
                ART_NAME,
                WG_NR,
                WOG_NR,
+               WG_NAME,
                EK,
                EINH,
                EINH_BEST,
                EINH_UMR,
-               WG_NAME,
                Lager
         FROM dbo.ART_STAMM_VW
         WHERE Aktiv = 1 AND WOG_NR > 3
-        ORDER BY WG_NAME ASC, HERST_ART_NR ASC
+        ORDER BY WG_NR ASC, HERST_ART_NR ASC
     """
     cursor.execute(sql)
     rows = cursor.fetchall()
@@ -88,36 +116,14 @@ def fetch_artikel_lager():
     data = [dict(zip(columns, row)) for row in rows]
     conn.close()
 
-    # Reverse-Mapping: WG_NAME(normalisiert) -> Übergruppe
-    wg_to_ueber = {}
-    for ueber, wg_set in UEBERGRUPPEN.items():
-        for wg in wg_set:
-            key = norm_name(wg)
-            if key in wg_to_ueber and wg_to_ueber[key] != ueber:
-                # nur Warnung, damit du Doppelzuordnungen siehst
-                print("WARN doppelt gemappt:", repr(wg), "->", wg_to_ueber[key], "und", ueber)
-            wg_to_ueber[key] = ueber
+    gruppen = gruppiere_artikel_nach_wg_nr(
+        artikel_liste=data,
+        uebergruppen=UEBERGRUPPEN,
+        auslassen=AUSLASSEN,
+    )
 
-    # Auslassen normalisiert
-    auslassen_norm = {norm_name(x) for x in AUSLASSEN}
+    order = list(UEBERGRUPPEN.keys())
+    rest = [k for k in gruppen.keys() if k not in UEBERGRUPPEN]
+    unique_groups = [k for k in order if k in gruppen] + sorted(rest, key=wg_num)
 
-    # FINAL gruppieren: Zielname = Übergruppe ODER Original-WG (wenn nicht gemappt)
-    final_gruppen = defaultdict(list)
-
-    for zeile in data:
-        wg_raw = zeile.get("WG_NAME") or ""
-        wg_disp = str(wg_raw).replace("\u00A0", " ")
-        wg_disp = re.sub(r"\s+", " ", wg_disp).strip()
-
-        wg_key = norm_name(wg_disp)
-
-        if wg_key in auslassen_norm:
-            continue
-
-        ziel = wg_to_ueber.get(wg_key, wg_disp)
-        final_gruppen[ziel].append(zeile)
-
-    # stabil sortierte Gruppenliste
-    unique_groups = sorted(final_gruppen.keys(), key=norm_name)
-
-    return len(rows), len(unique_groups), unique_groups, dict(final_gruppen)
+    return len(rows), len(unique_groups), unique_groups, gruppen

@@ -1,6 +1,5 @@
 from io import BytesIO
 from datetime import date
-from math import ceil
 
 from django.http import HttpResponse
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, PageBreak
@@ -8,12 +7,20 @@ from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib import colors
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-from firma_db import fetch_artikel_lager
+from firma_db import fetch_artikel_lager, STANDORTE, filtere_gruppen_fuer_standort
 
 
 def inventur_pdf_view(request):
+    # Standort über URL-Parameter wählen: ?site=A oder ?site=B
+    site = request.GET.get("site", "A")
+    cfg = STANDORTE.get(site, STANDORTE["A"])
+    standort_label = cfg["label"]
+
     count, anzahl_wg, unique_wg, gruppen = fetch_artikel_lager()
-    # gruppen ist: {gruppenname: [artikel...]}
+
+    # Standort-spezifisch Gruppen rausfiltern
+    unique_wg, gruppen = filtere_gruppen_fuer_standort(unique_wg, gruppen, cfg["skip_groups"])
+    anzahl_wg = len(unique_wg)
 
     def clean(v):
         if v is None:
@@ -40,9 +47,9 @@ def inventur_pdf_view(request):
     BODY_SIZE = 9
     CELL_PAD_X = 6
 
-    def fit_cell(text, col_width_pt, font_name=BODY_FONT, font_size=BODY_SIZE, pad_x=CELL_PAD_X):
-        usable = max(1, col_width_pt - 2 * pad_x)
-        return truncate_to_width(text, usable, font_name, font_size)
+    def fit_cell(text, col_width_pt):
+        usable = max(1, col_width_pt - 2 * CELL_PAD_X)
+        return truncate_to_width(text, usable, BODY_FONT, BODY_SIZE)
 
     buffer = BytesIO()
 
@@ -70,71 +77,64 @@ def inventur_pdf_view(request):
 
     col_widths = [55, 105, 102, 400, 105, 55, 155, 55]
 
-    ROWS_PER_PAGE = 50
-    pages_meta = []  # [(gruppenname, page_in_group, total_pages_in_group), ...]
-
     story = []
 
-    # Wichtig: Reihenfolge der Gruppen so nehmen, wie unique_wg sortiert ist
+    # --- Tabellen bauen: eine Tabelle pro Gruppe ---
     for gruppen_name in unique_wg:
         artikel_liste = gruppen.get(gruppen_name, [])
         if not artikel_liste:
             continue
 
-        total_pages = ceil(len(artikel_liste) / ROWS_PER_PAGE)
+        table_data = [header]
 
-        for p in range(total_pages):
-            start = p * ROWS_PER_PAGE
-            end = start + ROWS_PER_PAGE
-            chunk = artikel_liste[start:end]
+        for art in artikel_liste:
+            row = [
+                fit_cell(art.get("ART_NR"), col_widths[0]),
+                fit_cell(art.get("HERST_NAME"), col_widths[1]),
+                fit_cell(art.get("HERST_ART_NR"), col_widths[2]),
+                fit_cell(art.get("ART_NAME"), col_widths[3]),
+                "", "", "", "",
+            ]
+            table_data.append(row)
 
-            pages_meta.append((gruppen_name, p + 1, total_pages))
+        # --- Leerzeilen für händische Ergänzungen ---
+        EXTRA_EMPTY_ROWS = 10
 
-            table_data = [header]
-            for art in chunk:
-                row = [
-                    fit_cell(art.get("ART_NR"), col_widths[0]),
-                    fit_cell(art.get("HERST_NAME"), col_widths[1]),
-                    fit_cell(art.get("HERST_ART_NR"), col_widths[2]),
-                    fit_cell(art.get("ART_NAME"), col_widths[3]),
-                    "", "", "", "",
-                ]
-                table_data.append(row)
+        empty_row = [""] * len(header)
+        for _ in range(EXTRA_EMPTY_ROWS):
+            table_data.append(empty_row)
 
-            t = Table(table_data, colWidths=col_widths, repeatRows=1)
+        t = Table(
+            table_data,
+            colWidths=col_widths,
+            repeatRows=1  # Header wird auf jeder Seite wiederholt
+        )
 
-            t.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("FONTNAME", (0, 1), (-1, -1), BODY_FONT),
-                ("FONTSIZE", (0, 1), (-1, -1), BODY_SIZE),
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("FONTNAME", (0, 1), (-1, -1), BODY_FONT),
+            ("FONTSIZE", (0, 1), (-1, -1), BODY_SIZE),
 
-                ("LEFTPADDING", (0, 0), (-1, -1), CELL_PAD_X),
-                ("RIGHTPADDING", (0, 0), (-1, -1), CELL_PAD_X),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), CELL_PAD_X),
+            ("RIGHTPADDING", (0, 0), (-1, -1), CELL_PAD_X),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
 
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
-            ]))
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.whitesmoke),
+        ]))
 
-            story.append(t)
-            story.append(PageBreak())
+        story.append(t)
+        story.append(PageBreak())
 
     titel_links = "Thamm Inventur"
     datum_links = date.today().strftime("%d.%m.%Y")
-    footer_rechts = "Thamm GmbH"
+    footer_rechts = standort_label
 
     def on_page(canvas, doc_):
         canvas.saveState()
-
-        idx = doc_.page - 1
-        gruppen_name = ""
-        page_in_group = 0
-        total_in_group = 0
-        if 0 <= idx < len(pages_meta):
-            gruppen_name, page_in_group, total_in_group = pages_meta[idx]
 
         # Header links
         canvas.setFont("Helvetica-Bold", 12)
@@ -143,16 +143,8 @@ def inventur_pdf_view(request):
         canvas.setFont("Helvetica", 9)
         canvas.drawString(doc_.leftMargin, page_height - 45, datum_links)
 
-        # Header rechts: Gruppenname
-        canvas.setFont("Helvetica-Bold", 11)
-        canvas.drawRightString(page_width - doc_.rightMargin, page_height - 30, clean(gruppen_name))
-
-        # Footer Mitte: x von y (pro Gruppe)
+        # Footer rechts
         canvas.setFont("Helvetica", 9)
-        if total_in_group > 0:
-            canvas.drawCentredString(page_width / 2, 18, f"{page_in_group} von {total_in_group}")
-
-        # Footer rechts: Firma
         canvas.drawRightString(page_width - doc_.rightMargin, 18, footer_rechts)
 
         canvas.restoreState()
