@@ -18,11 +18,12 @@ from django.contrib import admin
 from django.urls import path
 from inventur import views
 
-from inventur.views import test_firma_view, lager_artikel_view
+#from inventur.views import test_firma_view, lager_artikel_view, inventur_pdf_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', views.startseite, name='startseite'),
-    path('test-artikel/', test_firma_view),
-    path('invi_tabelle/', lager_artikel_view)
+    #path('', views.startseite, name='startseite'),
+    #path('test-artikel/', test_firma_view),
+    path("inventur_pdf/", views.inventur_pdf_view, name="inventur_pdf"),
+    #path('invi_tabelle/', lager_artikel_view)
 ]

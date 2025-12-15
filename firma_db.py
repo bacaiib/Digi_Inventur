@@ -1,4 +1,5 @@
 import pyodbc
+import re
 from collections import defaultdict
 
 CONN_STR = (
@@ -11,31 +12,31 @@ CONN_STR = (
 )
 
 UEBERGRUPPEN = {
-    "3D-Druck": { "Filament", "Zubehör aus 3D-Druck" },
-    "Displays": { "Displays" },
-    "Drahtseile-Halter" : { "Drahtseile", "Drahtseilhalter" },
-    "Druckfolien": { "Folien - Druck", "Folien - Magnetisch/Ferro" },
-    "Laminate": { "Laminat" },
-    "Papier": { "Papier" },
-    "Papier Filme nicht SK": { "Filme nicht SK" },
-    "Platten": { "Platten", "Platten Acryl" },
-    "Plottfolien": { "Folien - Plott" },
-    "POS-Zubehör": { "POS-Zubehör" },
-    "PVC-Rollenware": { "PVC" },
-    "Standfüße Ürofile sont.": { "Profile sonstige", "standfüße" },
-    "Textil-Rollenware": { "Textilien dye-sub", "Textilien UV & sonstiges" },
-    "Truckframe txwall": { "truckframe", "txtrail", "txframe", "txwall" },
-    "Verbrauchsmat. Druck": { "Druck" },
-    "Verbrauchsmat. Klebebänder": { "Klebebänder" },
-    "Verbrauchsmat. Klett-Flauschbänder": { "Klett- & Flauschbänder" },
-    "Verbrauchsmat. Konfektion": { "Konfektion" },
-    "Verbrauchsmat. Messer Fräsen": { "Messer & Fräsen" },
-    "Verbrauchsmat. Metall": { "Metall" },
-    "Verbrauchsmat. Montage": { "Montage" },
-    "Verbrauchsmat. Tinten": { "Tinten" },
-    "Verbrauchsmat. Versand": { "Versand" },
-    "Verbrauchsmat. Werbetechnik": { "Werbetechnik" },
-    "Zubehör Metall": { "LED", "Zubehör" }
+    "3D-Druck": {"Filament", "Zubehör aus 3D-Druck"},
+    "Displays": {"Displays"},
+    "Drahtseile-Halter": {"Drahtseile", "Drahtseilhalter"},
+    "Druckfolien": {"Folien - Druck", "Folien - Magnetisch/Ferro"},
+    "Laminate": {"Laminat"},
+    "Papier": {"Papier"},
+    "Papier Filme nicht SK": {"Filme nicht SK"},
+    "Platten": {"Platten", "Platten Acryl"},
+    "Plottfolien": {"Folien - Plott"},
+    "POS-Zubehör": {"POS-Zubehör"},
+    "PVC-Rollenware": {"PVC"},
+    "Standfüße Ürofile sont.": {"Profile sonstige", "standfüße"},
+    "Textil-Rollenware": {"Textilien dye-sub", "Textilien UV & sonstiges"},
+    "Truckframe txwall": {"truckframe", "txtrail", "txframe", "txwall"},
+    "Verbrauchsmat. Druck": {"Druck"},
+    "Verbrauchsmat. Klebebänder": {"Klebebänder"},
+    "Verbrauchsmat. Klett-Flauschbänder": {"Klett- & Flauschbänder"},
+    "Verbrauchsmat. Konfektion": {"Konfektion"},
+    "Verbrauchsmat. Messer Fräsen": {"Messer & Fräsen"},
+    "Verbrauchsmat. Metall": {"Metall"},
+    "Verbrauchsmat. Montage": {"Montage"},
+    "Verbrauchsmat. Tinten": {"Tinten"},
+    "Verbrauchsmat. Versand": {"Versand"},
+    "Verbrauchsmat. Werbetechnik": {"Werbetechnik"},
+    "Zubehör Metall": {"LED", "Zubehör"},
 }
 
 AUSLASSEN = {
@@ -48,33 +49,17 @@ AUSLASSEN = {
     "Rohrrahmen",
     "skyframe",
     "Zubehör Kundenspezifisch",
-
 }
 
 
-def norm(s: str) -> str:
-    return (s or "").strip().casefold()
+def norm_name(s) -> str:
+    """Robust normalisieren (NBSP, Mehrfachspaces, Casefold)."""
+    if s is None:
+        return ""
+    s = str(s).replace("\u00A0", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s.casefold()
 
-def gruppen_zu_uebergruppen(gruppen: dict, UEBERGRUPPEN: dict, AUSLASSEN: set):
-    # Auslassen
-    gruppen = {k: v for k, v in gruppen.items() if k not in AUSLASSEN}
-
-    # Reverse-Mapping: WG_NAME -> Übergruppe
-    wg_to_ueber = {}
-    for ueber, wg_set in UEBERGRUPPEN.items():
-        for wg in wg_set:
-            wg_to_ueber[wg] = ueber
-
-    # Übergruppe -> [Artikel...]
-    ueber_dict = defaultdict(list)
-
-    for wg_name, artikel_liste in gruppen.items():
-        ueber = wg_to_ueber.get(wg_name, "Sonstiges")
-        ueber_dict[ueber].extend(artikel_liste)   # <- HIER: alles zusammenwerfen
-
-    return dict(ueber_dict)
-
-from collections import defaultdict
 
 def fetch_artikel_lager():
     conn = pyodbc.connect(CONN_STR)
@@ -103,25 +88,36 @@ def fetch_artikel_lager():
     data = [dict(zip(columns, row)) for row in rows]
     conn.close()
 
-    # 1) Gruppen (WG_NAME -> [Artikel...])
-    gruppen = defaultdict(list)
-    for zeile in data:
-        gruppen[zeile["WG_NAME"]].append(zeile)
-
-    # 2) Auslassen
-    gruppen = {k: v for k, v in gruppen.items() if k not in AUSLASSEN}
-
-    # 3) Reverse Mapping WG_NAME -> Übergruppe
+    # Reverse-Mapping: WG_NAME(normalisiert) -> Übergruppe
     wg_to_ueber = {}
     for ueber, wg_set in UEBERGRUPPEN.items():
         for wg in wg_set:
-            wg_to_ueber[wg] = ueber
+            key = norm_name(wg)
+            if key in wg_to_ueber and wg_to_ueber[key] != ueber:
+                # nur Warnung, damit du Doppelzuordnungen siehst
+                print("WARN doppelt gemappt:", repr(wg), "->", wg_to_ueber[key], "und", ueber)
+            wg_to_ueber[key] = ueber
 
-    # 4) FLAT: Übergruppe -> [Artikel...]  (genau eine Tabelle pro Übergruppe)
-    uebergruppen_flat = defaultdict(list)
-    for wg_name, artikel_liste in gruppen.items():
-        ueber = wg_to_ueber.get(wg_name, "Sonstiges")
-        uebergruppen_flat[ueber].extend(artikel_liste)
+    # Auslassen normalisiert
+    auslassen_norm = {norm_name(x) for x in AUSLASSEN}
 
-    unique_wg = sorted(gruppen.keys())
-    return len(rows), len(unique_wg), unique_wg, gruppen, dict(uebergruppen_flat)
+    # FINAL gruppieren: Zielname = Übergruppe ODER Original-WG (wenn nicht gemappt)
+    final_gruppen = defaultdict(list)
+
+    for zeile in data:
+        wg_raw = zeile.get("WG_NAME") or ""
+        wg_disp = str(wg_raw).replace("\u00A0", " ")
+        wg_disp = re.sub(r"\s+", " ", wg_disp).strip()
+
+        wg_key = norm_name(wg_disp)
+
+        if wg_key in auslassen_norm:
+            continue
+
+        ziel = wg_to_ueber.get(wg_key, wg_disp)
+        final_gruppen[ziel].append(zeile)
+
+    # stabil sortierte Gruppenliste
+    unique_groups = sorted(final_gruppen.keys(), key=norm_name)
+
+    return len(rows), len(unique_groups), unique_groups, dict(final_gruppen)
