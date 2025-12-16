@@ -2,7 +2,14 @@ import pyodbc
 import re
 from collections import defaultdict
 
-CONN_STR = (
+
+# ============================================================
+# Datenbank-Verbindung
+# ============================================================
+
+# Zentrale Connection-String-Definition.
+# später evtl. über ENV-Variablen lösen.
+CONNECTION_STRING = (
     "DRIVER={ODBC Driver 17 for SQL Server};"
     "SERVER=CORTEXSRV2\\CORTEX;"
     "DATABASE=THAMM_BN;"
@@ -11,6 +18,13 @@ CONN_STR = (
     "TrustServerCertificate=yes;"
 )
 
+
+# ============================================================
+# Fachliche Konfiguration
+# ============================================================
+
+# Zuordnung einzelner WG-Nummern zu übergeordneten Gruppen.
+# Diese Struktur bildet die fachliche Logik der Inventur ab.
 UEBERGRUPPEN = {
     "3D-Druck": {56, 59},
     "Displays": {36},
@@ -39,58 +53,104 @@ UEBERGRUPPEN = {
     "Zubehör Metall": {34, 24},
 }
 
-AUSLASSEN = {44, 6, 9, 110, 9992, 8123, 123, 634}
+# WG-Nummern, die grundsätzlich nicht inventarisiert werden
+AUSGESCHLOSSENE_WG_NUMMERN = {25, 37, 80, 35, 41, 67, 60, 23, 65}
 
+
+# Standort-spezifische Regeln
 STANDORTE = {
     "A": {
         "label": "Thamm GmbH",
-        "skip_groups": set(),  # nichts auslassen
+        "skip_groups": set(),
     },
     "B": {
         "label": "Thamm Süd GmbH",
-        "skip_groups": {"3D-Druck", "Truckframe txwall"},  # Beispiel
+        "skip_groups": {
+            "3D-Druck",
+            "Drahtseile-Halter",
+            "POS-Zubehör",
+            "Standfüße Profile sont.",
+            "Truckframe txwall",
+            "Verbrauchsmat. Metall",
+            "Verbrauchsmat. Montage",
+            "Zubehör Metall",
+        },
     },
 }
 
-def filtere_gruppen_fuer_standort(unique_wg, gruppen, skip_groups):
-    """Filtert Gruppen nach Gruppennamen (z.B. '3D-Druck')."""
-    skip_groups = set(skip_groups or [])
-    unique_wg = [g for g in unique_wg if g not in skip_groups]
-    gruppen = {g: gruppen[g] for g in unique_wg}
-    return unique_wg, gruppen
+
+# ============================================================
+# Hilfsfunktionen
+# ============================================================
+
+def gruppen_fuer_standort_filtern(gruppen_namen, gruppen_daten, auszuschliessende_gruppen):
+    """
+    Entfernt Gruppen, die für einen bestimmten Standort
+    nicht relevant sind (z. B. Standort B).
+    """
+    skip = set(auszuschliessende_gruppen or [])
+
+    gefilterte_namen = [g for g in gruppen_namen if g not in skip]
+    gefilterte_daten = {g: gruppen_daten[g] for g in gefilterte_namen}
+
+    return gefilterte_namen, gefilterte_daten
 
 
-def wg_num(k):
-    m = re.search(r"\bWG\s*(\d+)\b", str(k))
-    return int(m.group(1)) if m else 10**9
+def wg_nummer_fuer_sortierung(gruppenname):
+    """
+    Extrahiert die WG-Nummer aus einem Gruppennamen wie 'WG 12'.
+    Wird für eine saubere Sortierung der Restgruppen benötigt.
+    """
+    match = re.search(r"\bWG\s*(\d+)\b", str(gruppenname))
+    return int(match.group(1)) if match else 10**9
 
 
-def gruppiere_artikel_nach_wg_nr(artikel_liste, uebergruppen, auslassen):
-    wg_nr_to_ueber = {}
-    for ueber_name, wg_nr_set in uebergruppen.items():
-        for wg_nr in wg_nr_set:
-            if wg_nr in wg_nr_to_ueber:
-                print("WARN doppelte WG_NR:", wg_nr)
-            wg_nr_to_ueber[wg_nr] = ueber_name
+# ============================================================
+# Gruppierungslogik
+# ============================================================
+
+def artikel_nach_warengruppen_gruppieren(artikel_liste, uebergruppen, ausgeschlossene_wg):
+    """
+    Gruppiert Artikel anhand ihrer WG_NR in fachliche Warengruppen.
+    """
+    # Mapping: WG_NR -> Übergruppenname
+    wg_zu_gruppe = {}
+
+    for gruppenname, wg_set in uebergruppen.items():
+        for wg_nr in wg_set:
+            if wg_nr in wg_zu_gruppe:
+                # Sollte eigentlich nicht passieren,
+                # hilft aber beim Debuggen von Datenfehlern
+                print("WARNUNG: doppelte WG_NR-Zuordnung:", wg_nr)
+
+            wg_zu_gruppe[wg_nr] = gruppenname
 
     gruppen = defaultdict(list)
 
-    for art in artikel_liste:
-        wg_nr = art.get("WG_NR")
+    for artikel in artikel_liste:
+        wg_nr = artikel.get("WG_NR")
 
-        if wg_nr is None:
-            continue
-        if wg_nr in auslassen:
+        # Ungültige oder explizit ausgeschlossene WG überspringen
+        if wg_nr is None or wg_nr in ausgeschlossene_wg:
             continue
 
-        ziel_gruppe = wg_nr_to_ueber.get(wg_nr, f"WG {wg_nr}")
-        gruppen[ziel_gruppe].append(art)
+        zielgruppe = wg_zu_gruppe.get(wg_nr, f"WG {wg_nr}")
+        gruppen[zielgruppe].append(artikel)
 
     return dict(gruppen)
 
 
-def fetch_artikel_lager():
-    conn = pyodbc.connect(CONN_STR)
+# ============================================================
+# Datenbank-Zugriff
+# ============================================================
+
+def artikel_lager_laden():
+    """
+    Lädt alle relevanten Artikel aus der Datenbank,
+    gruppiert sie fachlich und liefert die Daten
+    strukturiert für die PDF-Erstellung zurück.
+    """
+    conn = pyodbc.connect(CONNECTION_STRING)
     cursor = conn.cursor()
 
     sql = """
@@ -107,23 +167,40 @@ def fetch_artikel_lager():
                EINH_UMR,
                Lager
         FROM dbo.ART_STAMM_VW
-        WHERE Aktiv = 1 AND WOG_NR > 3
+        WHERE Aktiv = 1
+          AND WOG_NR > 3
         ORDER BY WG_NR ASC, HERST_ART_NR ASC
     """
+
     cursor.execute(sql)
     rows = cursor.fetchall()
-    columns = [c[0] for c in cursor.description]
-    data = [dict(zip(columns, row)) for row in rows]
+
+    spalten = [col[0] for col in cursor.description]
+    daten = [dict(zip(spalten, row)) for row in rows]
+
     conn.close()
 
-    gruppen = gruppiere_artikel_nach_wg_nr(
-        artikel_liste=data,
+    # Artikel fachlich gruppieren
+    gruppen = artikel_nach_warengruppen_gruppieren(
+        artikel_liste=daten,
         uebergruppen=UEBERGRUPPEN,
-        auslassen=AUSLASSEN,
+        ausgeschlossene_wg=AUSGESCHLOSSENE_WG_NUMMERN,
     )
 
-    order = list(UEBERGRUPPEN.keys())
-    rest = [k for k in gruppen.keys() if k not in UEBERGRUPPEN]
-    unique_groups = [k for k in order if k in gruppen] + sorted(rest, key=wg_num)
+    # Reihenfolge:
+    # 1. definierte Übergruppen
+    # 2. restliche WG-Gruppen sortiert nach Nummer
+    uebergruppen_reihenfolge = list(UEBERGRUPPEN.keys())
+    restgruppen = [g for g in gruppen.keys() if g not in UEBERGRUPPEN]
 
-    return len(rows), len(unique_groups), unique_groups, gruppen
+    sortierte_gruppen = (
+        [g for g in uebergruppen_reihenfolge if g in gruppen]
+        + sorted(restgruppen, key=wg_nummer_fuer_sortierung)
+    )
+
+    return (
+        len(rows),                 # Anzahl Artikel
+        len(sortierte_gruppen),    # Anzahl Gruppen
+        sortierte_gruppen,         # Gruppenreihenfolge
+        gruppen,                   # Gruppierte Artikeldaten
+    )
