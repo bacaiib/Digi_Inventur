@@ -365,7 +365,7 @@ def inventur_pdf_view(request):
     # ================= Kopf- & Fußzeile =================
 
     titel_links = "Thamm Inventur"
-    datum_text = ("17.12.2025")
+    datum_text = "17.12.2025"
     fuss_rechts = standort_label
 
     def kopf_und_fuss_zeichnen(canvas, doc_):

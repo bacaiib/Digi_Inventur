@@ -22,8 +22,11 @@ from inventur import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("startseite/", views.inventur_pdf_view, name="startseite"),
+    path("inventur_uebersicht/", views.inventur_pdf_view, name="inventur_uebersicht"),
+    path("neue_inventur/", views.inventur_pdf_view, name="neue_inventur"),
+    path("inventur_bearbeiten/", views.inventur_pdf_view, name="inventur_bearbeiten"),
     #path('', views.startseite, name='startseite'),
     #path('test-artikel/', test_firma_view),
-    path("inventur_pdf/", views.inventur_pdf_view, name="inventur_pdf"),
     #path('invi_tabelle/', lager_artikel_view)
 ]
